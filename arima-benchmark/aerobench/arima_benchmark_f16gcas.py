@@ -62,6 +62,7 @@ def main():
     rmse_trials = pd.DataFrame(columns = ['trialnumber', 'rmse'])
     rmse_trials['trialnumber'] = trial_nums
     rmse_trials['rmse'] = trial_rmse
+    rmse_trials.to_csv("arima_results.csv")
 
     # Find best and worst RMSE values across the 2000 trials
     print("Best 5 RMSE Values:")
