@@ -34,8 +34,8 @@ def main_run_gcas():
     beta = random() * deg2rad(10)              # ! Side slip angle (rad)
 
     # Initial Attitude
-    alt = random() * 30000 + 5000      # ! altitude (ft)
-    vt = int(random() * 1500) + 500    # ! initial velocity (ft/sec)
+    alt = 30000    # ! altitude (ft)
+    vt = 1500 # ! initial velocity (ft/sec)
     negphi = random()
     if (negphi >= 0.5):
         phi = (random() * deg2rad(5))          # ! Roll angle from wings level (rad)

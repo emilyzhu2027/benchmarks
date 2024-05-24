@@ -11,45 +11,55 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
+from pmdarima.arima.stationarity import ADFTest
+import re
+
 
 def main():
-    trial_nums = []
-    trial_rmse_arima = []
-    trial_rmse_lstm = []
-    for i in range(2000): # 2000 trials
+    results_df = pd.DataFrame(columns = ['trial_num', 'data_type', 'p', 'd', 'q', 'rmse'])
+    for i in range(20): # 20 trials - can change 
         df = main_run_gcas() # Run flight simulator which uses randomized initial parameters
-        adf_test = adfuller(df['alt']) # Test if data is stationary
-        p_val_adf = adf_test[1]
-        while(p_val_adf >= 0.05): # If not stationary, differentiate until it is
-            df = df.diff().dropna()
-            adf_test = adfuller(df['alt'])
-            p_val_adf = adf_test[1]
+    
+        adf_test = ADFTest(alpha=0.05)
+        p_val, should_diff = adf_test.should_diff(df['alt'])
 
+        if(should_diff): 
+            data_type = 'not stationary'
+        else:
+            data_type = 'stationary'
+
+        
         train_size = int(0.7*len(df)) # Split train and test
         train = df.iloc[0:train_size]
         test = df.iloc[train_size:]
 
-  
+
         # ----------------- ARIMA ---------------------
         model = auto_arima(train['alt'], start_p=1, start_q=1, # Find best parameters for ARIMA model
-                      test='adf',
-                      max_p=10, max_q=10,
-                      m=1,             
-                      d=1,          
-                      seasonal=False,   
-                      start_P=0, 
-                      D=None, 
-                      trace=True,
-                      error_action='ignore',  
-                      suppress_warnings=True, 
-                      stepwise=True)
+                        test='adf',
+                        max_p=10, max_q=10,
+                        m=1,  
+                        d=3,                    
+                        seasonal=False,   
+                        start_P=0, 
+                        D=None, 
+                        trace=True,
+                        error_action='ignore',  
+                        suppress_warnings=True, 
+                        stepwise=True)
+        summary_string = str(model.summary())
+        param = re.findall('SARIMAX\(([0-9]+), ([0-9]+), ([0-9]+)',summary_string)
+        p,d,q = int(param[0][0]) , int(param[0][1]) , int(param[0][2])
         prediction, confint = model.predict(len(test), return_conf_int=True) # Make predictions
         cf= pd.DataFrame(confint)
         mse = mean_squared_error(test['alt'], prediction)
         rmse = mse**0.5
-        trial_nums.append(i)
-        trial_rmse_arima.append(rmse) # Calculate RMSE for predictions for this trial
-        plt.figure(figsize=(14,7)) # Plot prediction against test data
+
+        results_df = pd.concat([pd.DataFrame([[i+1, data_type, p, d, q, rmse]], columns=results_df.columns), results_df], ignore_index=True)
+
+        """
+        # Uncomment this part to plot prediction against test data
+        plt.figure(figsize=(14,7))
         plt.plot(train['alt'], label='Training Data')
         plt.plot(test['alt'], label='Actual Data', color='orange')
         prediction_df = pd.DataFrame(prediction)
@@ -64,12 +74,9 @@ def main():
         plt.ylabel('Alt')
         plt.legend()
         plt.show()
-
-   
-    rmse_trials = pd.DataFrame(columns = ['trialnumber', 'rmse_arima', 'rmse_lstm'])
-    rmse_trials['trialnumber'] = trial_nums
-    rmse_trials['rmse_arima'] = trial_rmse_arima
-    rmse_trials.to_csv("arima_results.csv")
+        """
+    
+    results_df.to_csv("arima_benchmark_results.csv")
 
 main()
 
