@@ -4,5 +4,4 @@
 
 
 ### LSTM Benchmark
-1. run arima-benchmark/aerobench/lstm_benchmark.py
-- run one trial of F16 flight simulator, and uses LSTM model to predict altitude of aircraft. although it technically runs, it's not quite accurate however and i'm working to fix that!
+not working rn :(
