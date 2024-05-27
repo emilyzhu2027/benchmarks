@@ -1,158 +1,115 @@
-# ================================================================ #
-#                       LSTM Neural Networks                       #
-# ================================================================ #
+import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-from run_GCAS import main_run_gcas
-import pandas as pd
-from torch.utils.data import Dataset
-import numpy as np
+import torch.optim as optim
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
 
-# Hyper parameters
-import tqdm
+# Generate synthetic time series data
+np.random.seed(42)
+time_series_length = 1000
+time = np.arange(0, time_series_length)
+data = np.sin(0.02 * time) + 0.5 * np.random.normal(size=time_series_length)
 
-class PandasDataset(Dataset):
-    def __init__(self, dataframe):
-        self.dataframe = dataframe
+# Plot the synthetic data
+plt.figure(figsize=(12, 6))
+plt.plot(time, data)
+plt.title('Synthetic Time Series Data')
+plt.xlabel('Time')
+plt.ylabel('Value')
+plt.show()
 
-    def __len__(self):
-        return len(self.dataframe)
+# Prepare the data for LSTM
+def create_dataset(data, time_step=1):
+    X, Y = [], []
+    for i in range(len(data)-time_step-1):
+        a = data[i:(i+time_step)]
+        X.append(a)
+        Y.append(data[i + time_step])
+    return np.array(X), np.array(Y)
 
-    def __getitem__(self, index):
-        row = self.dataframe.iloc[index]
-        return row['features'], row['label']
+# Normalize the data
+scaler = MinMaxScaler(feature_range=(0, 1))
+data = data.reshape(-1, 1)
+data = scaler.fit_transform(data)
 
-# split a univariate sequence into samples
-def split_sequence(sequence, n_steps):
-    X, y = list(), list()
-    for i in range(len(sequence)):
-    # find the end of this pattern
-        end_ix = i + n_steps
-        # check if we are beyond the sequence
-        if end_ix > len(sequence)-1:
-            break
-        # gather input and output parts of the pattern
-        seq_x, seq_y = sequence[i:end_ix], sequence[end_ix]
-        X.append(seq_x)
-        y.append(seq_y)
-    print(X)
-    print(y)
-    return torch.tensor(X), torch.tensor(y)
-    # return array of lists
+# Split the data into train and test sets
+train_size = int(len(data) * 0.67)
+test_size = len(data) - train_size
+train_data, test_data = data[0:train_size, :], data[train_size:len(data), :]
 
-batch_size = 10
-num_epochs = 10
-learning_rate = 0.1
+# Create dataset for training
+time_step = 10
+X_train, y_train = create_dataset(train_data, time_step)
+X_test, y_test = create_dataset(test_data, time_step)
 
-input_dim = 3
-hidden_dim = 10
-sequence_dim = 28
-layer_dim = 1
-output_dim = 10
+# Convert data to PyTorch tensors
+X_train = torch.tensor(X_train, dtype=torch.float32).unsqueeze(2)
+y_train = torch.tensor(y_train, dtype=torch.float32)
+X_test = torch.tensor(X_test, dtype=torch.float32).unsqueeze(2)
+y_test = torch.tensor(y_test, dtype=torch.float32)
 
-# Device Configuration
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-# ================================================================ #
-#                        Data Loading Process                      #
-# ================================================================ #
-
-# Dataset
-df = main_run_gcas()
-n_steps = 3 # lookback 3 time steps
-X, y = split_sequence(df['alt'].values.astype('float32'), n_steps)
-df_data_split = pd.DataFrame(columns=['features', 'label'])
-df_data_split['features'] = X.tolist()
-df_data_split['label'] = y.tolist()
-
-train_size = int(0.7*len(df_data_split)) # Split train and test
-train = df_data_split.iloc[0:train_size]
-test = df_data_split.iloc[train_size:]
-
-train_dataset = PandasDataset(pd.DataFrame(train))
-test_dataset = PandasDataset(pd.DataFrame(test))
-
-# Data Loader
-train_loader = torch.utils.data.DataLoader(
-    dataset=train_dataset,
-    batch_size=batch_size,
-    shuffle=True,
-    drop_last=True,
-)
-
-test_loader = torch.utils.data.DataLoader(
-    dataset=test_dataset,
-    batch_size=batch_size,
-    shuffle=False,
-    drop_last=True,
-)
-
-
-# ================================================================ #
-#                       Create Model Class                         #
-# ================================================================ #
-
+# Define the LSTM model
 class LSTMModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
+    def __init__(self, input_size=1, hidden_layer_size=50, output_size=1):
         super(LSTMModel, self).__init__()
-        # Hidden dimensions
-        self.hidden_dim = hidden_dim
+        self.hidden_layer_size = hidden_layer_size
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
+        self.linear = nn.Linear(hidden_layer_size, output_size)
+        self.hidden_cell = (torch.zeros(1, 1, self.hidden_layer_size),
+                            torch.zeros(1, 1, self.hidden_layer_size))
 
-        # Number of hidden layers
-        self.layer_dim = layer_dim
+    def forward(self, input_seq):
+        lstm_out, self.hidden_cell = self.lstm(input_seq, self.hidden_cell)
+        predictions = self.linear(lstm_out[:, -1])
+        return predictions
 
-        self.lstm = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
-
-        # Readout layer
-        self.fc = nn.Linear(hidden_dim, output_dim)
-
-    def forward(self, x):
-        # Initialize hidden state with zeros
-        h0 = torch.zeros(self.layer_dim, self.hidden_dim).to(device)
-        #h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(device)
-
-        # Initialize cell state
-        c0 = torch.zeros(self.layer_dim, self.hidden_dim).to(device)
-        #c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(device)
-    
-
-        out, (hn, cn) = self.lstm(x, (h0, c0))
-        out = self.fc(out[:, -1])
-        
-        # out.size() --> 100, 10
-        return out
-
-
-model = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim).to(device)
-
-# Loss function
-loss_fn = nn.MSELoss(reduction="mean")
-
-# Optimizer
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-
-# ================================================================ #
-#                           Train and Test                         #
-# ================================================================ #
+# Initialize the model, define the loss function and the optimizer
+model = LSTMModel()
+loss_function = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Train the model
-iter = 0
-print('TRAINING STARTED.\n')
-for epoch in range(num_epochs):
-    for x_batch, y_batch in train_loader:
-        x_batch = torch.stack(x_batch, dim=1)
-        print(x_batch.size())
-        x_batch = x_batch.type(torch.FloatTensor)
-        outputs = model(x_batch)
-        y_batch = y_batch.type(torch.FloatTensor)
-        loss = loss_fn(outputs, y_batch)
-
+epochs = 20
+for epoch in range(epochs):
+    for i in range(len(X_train)):
+        model.hidden_cell = (torch.zeros(1, 1, model.hidden_layer_size),
+                             torch.zeros(1, 1, model.hidden_layer_size))
         optimizer.zero_grad()
-        loss.backward()
+        y_pred = model(X_train[i].unsqueeze(0))
+        single_loss = loss_function(y_pred, y_train[i].unsqueeze(0))
+        single_loss.backward()
         optimizer.step()
 
-        iter += 1
-        if iter % 10 == 0:
-            # Calculate Loss
-            print(f'Epoch: {epoch + 1}/{num_epochs}\t Iteration: {iter}\t Loss: {loss.item():.2f}')
+    if epoch % 10 == 0:
+        print(f'Epoch {epoch} loss: {single_loss.item()}')
 
+# Make predictions
+model.eval()
+with torch.no_grad():
+    train_predict = model(X_train).numpy()
+    test_predict = model(X_test).numpy()
+
+# Inverse transform predictions
+train_predict = scaler.inverse_transform(train_predict)
+test_predict = scaler.inverse_transform(test_predict)
+y_train = scaler.inverse_transform(y_train.unsqueeze(1).numpy())
+y_test = scaler.inverse_transform(y_test.unsqueeze(1).numpy())
+
+# Calculate RMSE
+train_rmse = np.sqrt(mean_squared_error(y_train, train_predict))
+test_rmse = np.sqrt(mean_squared_error(y_test, test_predict))
+print(f'Train RMSE: {train_rmse}')
+print(f'Test RMSE: {test_rmse}')
+
+# Plot the predictions
+plt.figure(figsize=(12, 6))
+plt.plot(time, scaler.inverse_transform(data), label='Original Data')
+plt.plot(time[time_step:len(train_predict)+time_step], train_predict, label='Train Prediction')
+plt.plot(time[len(train_predict)+(time_step*2)+1:len(data)-1], test_predict, label='Test Prediction')
+plt.legend()
+plt.title('Original Data vs Predictions')
+plt.xlabel('Time')
+plt.ylabel('Value')
+plt.show()
