@@ -5,17 +5,17 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
+from run_GCAS import main_run_gcas
 
-# Generate synthetic time series data
-np.random.seed(42)
-time_series_length = 1000
-time = np.arange(0, time_series_length)
-data = np.sin(0.02 * time) + 0.5 * np.random.normal(size=time_series_length)
+# Dataset
+df = main_run_gcas()
+data = df['alt'].values
+time = np.arange(0, len(df['alt']))
 
 # Plot the synthetic data
 plt.figure(figsize=(12, 6))
 plt.plot(time, data)
-plt.title('Synthetic Time Series Data')
+plt.title('Time Series Data')
 plt.xlabel('Time')
 plt.ylabel('Value')
 plt.show()
@@ -45,10 +45,10 @@ X_train, y_train = create_dataset(train_data, time_step)
 X_test, y_test = create_dataset(test_data, time_step)
 
 # Convert data to PyTorch tensors
-X_train = torch.tensor(X_train, dtype=torch.float32).unsqueeze(2)
-y_train = torch.tensor(y_train, dtype=torch.float32)
-X_test = torch.tensor(X_test, dtype=torch.float32).unsqueeze(2)
-y_test = torch.tensor(y_test, dtype=torch.float32)
+X_train = torch.tensor(X_train, dtype=torch.float32)
+y_train = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1)
+X_test = torch.tensor(X_test, dtype=torch.float32)
+y_test = torch.tensor(y_test, dtype=torch.float32).unsqueeze(1)
 
 # Define the LSTM model
 class LSTMModel(nn.Module):
@@ -72,13 +72,19 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Train the model
 epochs = 20
+batch_size = 64
+
 for epoch in range(epochs):
-    for i in range(len(X_train)):
-        model.hidden_cell = (torch.zeros(1, 1, model.hidden_layer_size),
-                             torch.zeros(1, 1, model.hidden_layer_size))
+    model.train()
+    for i in range(0, len(X_train), batch_size):
+        X_batch = X_train[i:i+batch_size]
+        y_batch = y_train[i:i+batch_size]
+        model.hidden_cell = (torch.zeros(1, X_batch.size(0), model.hidden_layer_size),
+                             torch.zeros(1, X_batch.size(0), model.hidden_layer_size))
+        
         optimizer.zero_grad()
-        y_pred = model(X_train[i].unsqueeze(0))
-        single_loss = loss_function(y_pred, y_train[i].unsqueeze(0))
+        y_pred = model(X_batch)
+        single_loss = loss_function(y_pred, y_batch)
         single_loss.backward()
         optimizer.step()
 
@@ -94,8 +100,8 @@ with torch.no_grad():
 # Inverse transform predictions
 train_predict = scaler.inverse_transform(train_predict)
 test_predict = scaler.inverse_transform(test_predict)
-y_train = scaler.inverse_transform(y_train.unsqueeze(1).numpy())
-y_test = scaler.inverse_transform(y_test.unsqueeze(1).numpy())
+y_train = scaler.inverse_transform(y_train.numpy())
+y_test = scaler.inverse_transform(y_test.numpy())
 
 # Calculate RMSE
 train_rmse = np.sqrt(mean_squared_error(y_train, train_predict))
