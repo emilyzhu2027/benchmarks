@@ -46,9 +46,14 @@ X_test, y_test = create_dataset(test_data, time_step)
 
 # Convert data to PyTorch tensors
 X_train = torch.tensor(X_train, dtype=torch.float32)
-y_train = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1)
+y_train = torch.tensor(y_train, dtype=torch.float32)
 X_test = torch.tensor(X_test, dtype=torch.float32)
-y_test = torch.tensor(y_test, dtype=torch.float32).unsqueeze(1)
+y_test = torch.tensor(y_test, dtype=torch.float32)
+
+print(f"X_train shape: {X_train.shape}")
+print(f"y_train shape: {y_train.shape}")
+print(f"X_test shape: {X_test.shape}")
+print(f"y_test shape: {y_test.shape}")
 
 # Define the LSTM model
 class LSTMModel(nn.Module):
@@ -57,11 +62,11 @@ class LSTMModel(nn.Module):
         self.hidden_layer_size = hidden_layer_size
         self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
         self.linear = nn.Linear(hidden_layer_size, output_size)
-        self.hidden_cell = (torch.zeros(1, 1, self.hidden_layer_size),
-                            torch.zeros(1, 1, self.hidden_layer_size))
 
     def forward(self, input_seq):
-        lstm_out, self.hidden_cell = self.lstm(input_seq, self.hidden_cell)
+        h_0 = torch.zeros(1, input_seq.size(0), self.hidden_layer_size).to(input_seq.device)
+        c_0 = torch.zeros(1, input_seq.size(0), self.hidden_layer_size).to(input_seq.device)
+        lstm_out, _ = self.lstm(input_seq, (h_0, c_0))
         predictions = self.linear(lstm_out[:, -1])
         return predictions
 
@@ -70,8 +75,10 @@ model = LSTMModel()
 loss_function = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+print(model)
+
 # Train the model
-epochs = 20
+epochs = 150
 batch_size = 64
 
 for epoch in range(epochs):
@@ -79,10 +86,13 @@ for epoch in range(epochs):
     for i in range(0, len(X_train), batch_size):
         X_batch = X_train[i:i+batch_size]
         y_batch = y_train[i:i+batch_size]
-        model.hidden_cell = (torch.zeros(1, X_batch.size(0), model.hidden_layer_size),
-                             torch.zeros(1, X_batch.size(0), model.hidden_layer_size))
+
+        #X_batch = X_batch.transpose(0, 1).contiguous()
         
+
         optimizer.zero_grad()
+        
+
         y_pred = model(X_batch)
         single_loss = loss_function(y_pred, y_batch)
         single_loss.backward()
@@ -100,6 +110,7 @@ with torch.no_grad():
 # Inverse transform predictions
 train_predict = scaler.inverse_transform(train_predict)
 test_predict = scaler.inverse_transform(test_predict)
+print(y_train.size())
 y_train = scaler.inverse_transform(y_train.numpy())
 y_test = scaler.inverse_transform(y_test.numpy())
 
